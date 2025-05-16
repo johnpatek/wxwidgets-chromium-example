@@ -1,84 +1,144 @@
 #include <wx/wx.h>
 #include <wx/webview.h>
 #include <wx/webview_chromium.h>
-
+#include <wx/filename.h>
+#include <wx/stdpaths.h>
+#include <wx/uri.h>
+#include <wx/wfstream.h>
+#include <wx/msw/private.h>
 #include "include/cef_app.h"
+#include "include/cef_client.h"
 
-class ExampleCefApp : public CefApp, public CefBrowserProcessHandler
+#include <queue>
+
+static bool InitProcess(const std::function<bool()> &initParent);
+
+// a simple message queue
+class MessageQueue : public wxWebViewHandler
+{
+public:
+    MessageQueue()
+        : wxWebViewHandler("https")
+    {
+        SetVirtualHost("wxreact.ipc");
+    }
+
+    void StartRequest(const wxWebViewHandlerRequest &request,
+                      wxSharedPtr<wxWebViewHandlerResponse> response) override
+    {
+        response->SetHeader("Access-Control-Allow-Origin", "*");
+        response->SetHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        if (request.GetMethod() == "GET" && request.GetURI().EndsWith("/PopMessage"))
+        {
+            response->SetStatus(200);
+            response->SetContentType("application/json");
+            response->Finish(PopMessage());
+        }
+        else if (request.GetMethod() == "POST" && request.GetURI().EndsWith("/PushMessage"))
+        {
+            response->SetStatus(200);
+            response->Finish("");
+            PushMessage(request.GetDataString());
+        }
+        else
+        {
+            response->SetStatus(404);
+            response->FinishWithError();
+        }
+    }
+
+private:
+    void PushMessage(const wxString &message)
+    {
+        m_messageQueue.push(message);
+    }
+
+    wxString PopMessage()
+    {
+        wxString message = "{\"message\": \"\"}";
+        if (!m_messageQueue.empty())
+        {
+            message = m_messageQueue.front();
+            m_messageQueue.pop();
+        }
+        return message;
+    }
+
+    std::queue<wxString> m_messageQueue;
+};
+
+class ReactFrame : public wxFrame
+{
+public:
+    ReactFrame(const wxPoint &pos = wxDefaultPosition, const wxSize &size = wxDefaultSize) : wxFrame(nullptr, wxID_ANY, "wxWebView StartRequest Example", pos, size, wxDEFAULT_FRAME_STYLE | wxTAB_TRAVERSAL)
+    {
+        m_webView = new wxWebViewChromium(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize);
+    }
+
+    ~ReactFrame() = default;
+
+    void Init()
+    {
+        m_webView->Bind(
+            wxEVT_WEBVIEW_CREATED, [&](wxWebViewEvent &event)
+            {
+                wxString directoryMapping = wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
+#if _WIN32
+                directoryMapping.Replace("\\", "/");
+#endif
+                directoryMapping.Append("/dist");
+                m_webView->RegisterHandler(wxSharedPtr<wxWebViewHandler>(new MessageQueue()));
+                m_webView->SetRoot(directoryMapping);
+                m_webView->LoadURL("file:///index.html"); 
+            });
+    }
+
+private:
+    wxWebViewChromium *m_webView;
+};
+
+class ReactApp : public wxApp
+{
+public:
+    bool OnInit() override
+    {
+        return InitProcess([this]()
+                           {
+            m_reactFrame = std::make_unique<ReactFrame>(wxPoint(50, 50), wxSize(800, 600));
+            m_reactFrame->Init();
+            m_reactFrame->Show();
+            return true; });
+    }
+
+    int OnExit() override
+    {
+        return 0;
+    }
+
+private:
+    std::unique_ptr<ReactFrame> m_reactFrame;
+};
+
+wxIMPLEMENT_APP_CONSOLE(ReactApp);
+
+class ReactCefApp : public CefApp, public CefBrowserProcessHandler
 {
 public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override
     {
         return this;
     }
-    IMPLEMENT_REFCOUNTING(ExampleCefApp);
+    IMPLEMENT_REFCOUNTING(ReactCefApp);
 };
 
-class ExampleWebViewHandler : public wxWebViewHandler
+bool InitProcess(const std::function<bool()> &initParent)
 {
-public:
-    ExampleWebViewHandler(const wxString &directoryMapping) : wxWebViewHandler("wxapp") {}
-    virtual ~ExampleWebViewHandler() {}
-    void StartRequest(const wxWebViewHandlerRequest &request,
-                      wxSharedPtr<wxWebViewHandlerResponse> response) override
+    bool result = false;
+    CefMainArgs main_args(wxGetInstance());
+    CefRefPtr<ReactCefApp> cef_app = new ReactCefApp;
+    if (CefExecuteProcess(main_args, cef_app, nullptr) < 0)
     {
-        wxString uri(request.GetURI());
-        uri.Replace("wxapp:", "", true);
+        result = initParent();
     }
-
-private:
-};
-
-class ExampleApp : public wxApp
-{
-public:
-    bool OnInit() override
-    {
-        m_frame = std::make_unique<wxFrame>(nullptr, wxID_ANY, "Chromium Example", wxDefaultPosition, wxDefaultSize, wxDEFAULT_FRAME_STYLE | wxTAB_TRAVERSAL);
-        wxWebView *webView = wxWebView::New(m_frame.get(), wxID_ANY, "",
-                                            wxDefaultPosition, wxDefaultSize, wxWebViewBackendChromium);
-        webView->Bind(
-            wxEVT_WEBVIEW_CREATED,
-            [webView](wxWebViewEvent &event)
-            {
-                const wxString directoryMapping("");
-                wxSharedPtr<wxWebViewHandler> handler(new ExampleWebViewHandler(directoryMapping));
-                webView->RegisterHandler(handler);
-                webView->LoadURL("wxapp:index.html");
-            });
-        return true;
-    }
-    int OnExit() override
-    {
-        m_frame.reset();
-        return 0;
-    }
-
-private:
-    std::unique_ptr<wxFrame> m_frame;
-};
-
-static void AppMain()
-{
-    std::unique_ptr<wxApp> app(new ExampleApp());
-    wxApp::SetInstance(app.get());
-    wxTheApp->CallOnInit();
-    wxTheApp->OnRun();
-    wxTheApp->OnExit();
-    wxTheApp->CleanUp();
-}
-
-int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-{
-    CefMainArgs main_args(hInstance);
-    CefRefPtr<ExampleCefApp> app = new ExampleCefApp();
-    int exit_code = CefExecuteProcess(main_args, app, nullptr);
-    if (exit_code >= 0)
-    {
-        return exit_code;
-    }
-    wxInitialize();
-    AppMain();
-    wxUninitialize();
-    return 0;
+    return result;
 }
