@@ -14,11 +14,11 @@
 static bool InitProcess(const std::function<bool()> &initParent);
 
 // a simple message queue
-class MessageQueue : public wxWebViewHandler
+class EchoHandler : public wxWebViewHandler
 {
 public:
-    MessageQueue()
-        : wxWebViewHandler("https")
+    EchoHandler(wxWindow *window)
+        : wxWebViewHandler("https"), m_window(window)
     {
         SetVirtualHost("wxreact.ipc");
     }
@@ -28,17 +28,11 @@ public:
     {
         response->SetHeader("Access-Control-Allow-Origin", "*");
         response->SetHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        if (request.GetMethod() == "GET" && request.GetURI().EndsWith("/PopMessage"))
+        if (request.GetMethod() == "POST" && request.GetURI().EndsWith("/EchoMessage"))
         {
-            response->SetStatus(200);
-            response->SetContentType("application/json");
-            response->Finish(PopMessage());
-        }
-        else if (request.GetMethod() == "POST" && request.GetURI().EndsWith("/PushMessage"))
-        {
+            wxMessageBox(wxString::Format("Posted Message: %s", request.GetDataString().c_str()), "Message Received", wxOK | wxICON_INFORMATION, m_window);
             response->SetStatus(200);
             response->Finish("");
-            PushMessage(request.GetDataString());
         }
         else
         {
@@ -46,25 +40,8 @@ public:
             response->FinishWithError();
         }
     }
-
 private:
-    void PushMessage(const wxString &message)
-    {
-        m_messageQueue.push(message);
-    }
-
-    wxString PopMessage()
-    {
-        wxString message = "{\"message\": \"\"}";
-        if (!m_messageQueue.empty())
-        {
-            message = m_messageQueue.front();
-            m_messageQueue.pop();
-        }
-        return message;
-    }
-
-    std::queue<wxString> m_messageQueue;
+    wxWindow *m_window;
 };
 
 class ReactFrame : public wxFrame
@@ -87,7 +64,7 @@ public:
                 directoryMapping.Replace("\\", "/");
 #endif
                 directoryMapping.Append("/dist");
-                m_webView->RegisterHandler(wxSharedPtr<wxWebViewHandler>(new MessageQueue()));
+                m_webView->RegisterHandler(wxSharedPtr<wxWebViewHandler>(new EchoHandler(this)));
                 m_webView->SetRoot(directoryMapping);
                 m_webView->LoadURL("file:///index.html"); 
             });
@@ -119,7 +96,7 @@ private:
     std::unique_ptr<ReactFrame> m_reactFrame;
 };
 
-wxIMPLEMENT_APP_CONSOLE(ReactApp);
+wxIMPLEMENT_APP(ReactApp);
 
 class ReactCefApp : public CefApp, public CefBrowserProcessHandler
 {

@@ -3,10 +3,12 @@ import './App.css'
 
 function App() {
   const [text, setText] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSend = async () => {
+    setLoading(true);
     try {
-      const response = await fetch('https://wxreact.ipc/EchoMessage', {
+      await fetch('https://wxreact.ipc/EchoMessage', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -14,16 +16,15 @@ function App() {
         body: JSON.stringify({ message: text }),
       });
 
-      const result = await response.json();
-      console.log('Server response:', result);
     } catch (err) {
       console.error('POST request failed:', err);
     }
+    setLoading(false);
   };
 
   return (
     <>
-      <h1>Vite + React</h1>
+      <h1>Demo</h1>
       <div className="card">
         <input
           type="text"
@@ -31,10 +32,12 @@ function App() {
           onChange={(e) => setText(e.target.value)}
           placeholder="Enter message"
         />
-        <button onClick={handleSend}>Send</button>
+        <button onClick={handleSend} disabled={loading}>
+          Send
+        </button>
       </div>
     </>
   );
 }
 
-export default App
+export default App;

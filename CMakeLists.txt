@@ -22,7 +22,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CEF_ROOT}/cmake)
 find_package(CEF REQUIRED)
 
 if(WIN32)
-    add_executable(example main.cpp)
+    add_executable(example WIN32 main.cpp)
 else()
     add_executable(example main.cpp)
 endif()
