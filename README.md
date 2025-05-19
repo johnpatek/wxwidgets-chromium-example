@@ -24,7 +24,7 @@ This will handle building both the executable and the NodeJS project.
 
 Here is the ReactJS app rendered in the WebView:
 
-![Basic Window](images/image0)
+![Basic Window](images/image0.png)
 
 This is a popup message that is created when the wxWebViewHandler receives a POST request:
 
